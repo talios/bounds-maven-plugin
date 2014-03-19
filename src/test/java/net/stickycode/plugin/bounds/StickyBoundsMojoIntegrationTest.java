@@ -26,6 +26,8 @@ public class StickyBoundsMojoIntegrationTest {
   @Test
   public void matchVersionRanges() {
     StickyBoundsMojo mojo = new StickyBoundsMojo();
+    assertThat(mojo.matchVersion("1.0,2").matches()).isFalse();
+    assertThat(mojo.matchVersion("[1.0,2]").matches()).isFalse();
     assertThat(mojo.matchVersion("[1.0,2)").matches()).isTrue();
     assertThat(mojo.matchVersion("[1.0,2.0)").matches()).isTrue();
     assertThat(mojo.matchVersion("[1.0,)").matches()).isTrue();
