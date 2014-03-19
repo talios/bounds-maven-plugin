@@ -75,7 +75,7 @@ public class StickyBoundsMojo
    */
   private List<RemoteRepository> repositories;
 
-  public Matcher matchVersion(String version) {
+  Matcher matchVersion(String version) {
     return range.matcher(version);
   }
 
