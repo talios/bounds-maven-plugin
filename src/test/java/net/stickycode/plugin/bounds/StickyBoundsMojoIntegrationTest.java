@@ -31,6 +31,7 @@ public class StickyBoundsMojoIntegrationTest {
     assertThat(mojo.matchVersion("[1.0,)").matches()).isTrue();
     assertThat(mojo.matchVersion("[1.0,2.3.4)").matches()).isTrue();
     assertThat(mojo.matchVersion("[1.0.4,2.3.4)").matches()).isTrue();
+    assertThat(mojo.matchVersion("[1.0.4-SNAPSHOT,2.3.4-SNAPSHOT)").matches()).isTrue();
   } 
 
   @Test
