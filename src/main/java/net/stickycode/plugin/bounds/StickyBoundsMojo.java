@@ -76,7 +76,7 @@ public class StickyBoundsMojo
   private List<RemoteRepository> repositories;
 
   /**
-   * @parameter expression="${includeSnapshots}" default-value="false"
+   * @parameter property="includeSnapshots" default-value="false"
    */
   private Boolean includeSnapshots = false;
 
