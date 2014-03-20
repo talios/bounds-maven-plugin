@@ -98,8 +98,9 @@ public class StickyBoundsMojo
             dependency.getType(),
             dependency.getClassifier(),
             version);
-        Version highestVersion = highestVersion(version, artifact);
-        String newVersion = "[" + highestVersion.toString() + "," + versionMatch.group(1) + ")";
+        Version highestVersion = highestVersion(artifact);
+        String upperVersion = versionMatch.group(1) != null ? versionMatch.group(1) : "";
+        String newVersion = "[" + highestVersion.toString() + "," + upperVersion + ")";
         if (!newVersion.equals(version)) {
           getLog().info("Updating " + artifact.toString() + " to " + newVersion);
           update(pom, artifact, newVersion);
@@ -135,7 +136,7 @@ public class StickyBoundsMojo
     }
   }
 
-  private Version highestVersion(String version, Artifact artifact) {
+  private Version highestVersion(Artifact artifact) {
     VersionRangeRequest request = new VersionRangeRequest(artifact, repositories, null);
     VersionRangeResult v = resolve(request);
     
