@@ -163,8 +163,11 @@ public class StickyBoundsMojo
       v.setVersions(filtered);
     }
 
-    if (v.getHighestVersion() == null)
-      throw new MojoExecutionException("Failed to resolve " + artifact.toString(), v.getExceptions().get(0));
+    if (v.getHighestVersion() == null) {
+      throw (v.getExceptions().isEmpty())
+          ? new MojoExecutionException("Failed to resolve " + artifact.toString())
+          : new MojoExecutionException("Failed to resolve " + artifact.toString(), v.getExceptions().get(0));
+    }
 
     return v.getHighestVersion();
   }
