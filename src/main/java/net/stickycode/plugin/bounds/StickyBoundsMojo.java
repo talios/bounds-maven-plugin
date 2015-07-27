@@ -3,6 +3,7 @@ package net.stickycode.plugin.bounds;
 import nu.xom.Builder;
 import nu.xom.Document;
 import nu.xom.Element;
+import nu.xom.Elements;
 import nu.xom.Node;
 import nu.xom.Nodes;
 import nu.xom.ParentNode;
@@ -82,6 +83,11 @@ public class StickyBoundsMojo
   private Boolean includeSnapshots = false;
 
   /**
+   * @parameter property="updateProperties" default-value="false"
+   */
+  private Boolean updateProperties = false;
+
+  /**
    * @parameter property="failImmediately" default-value="false"
    */
   private Boolean failImmediately = false;
@@ -94,22 +100,56 @@ public class StickyBoundsMojo
     Document pom = load();
     boolean changed = false;
 
-    for (Dependency dependency : project.getDependencies()) {
-      String version = dependency.getVersion();
-      Matcher versionMatch = matchVersion(version);
-      if (versionMatch.matches()) {
-        Artifact artifact = new DefaultArtifact(
-            dependency.getGroupId(),
-            dependency.getArtifactId(),
-            dependency.getType(),
-            dependency.getClassifier(),
-            version);
+    for (String propertyName : project.getProperties().stringPropertyNames()) {
+      if (propertyName.endsWith(".version")) {
         try {
-          Version highestVersion = highestVersion(artifact);
-          String upperVersion = versionMatch.group(1) != null ? versionMatch.group(1) : "";
-          String newVersion = "[" + highestVersion.toString() + "," + upperVersion + ")";
-          if (!newVersion.equals(version)) {
-            update(pom, artifact, newVersion);
+          final String version = project.getProperties().getProperty(propertyName);
+          Dependency dependency = findDependencyUsingVersionProperty(propertyName);
+          if (dependency != null) {
+            Artifact artifact = resolveLatestVersionRange(dependency, version);
+            if (!artifact.getVersion().equals(version)) {
+              updateProperty(pom, propertyName, artifact.getVersion());
+              changed |= true;
+            }
+          } else {
+            getLog().warn("No dependency found using " + propertyName);
+          }
+        } catch (MojoExecutionException e) {
+          if (!failImmediately) {
+            getLog().warn(e.getMessage());
+          } else {
+            throw e;
+          }
+        }
+      }
+    }
+
+    for (Dependency dependency : project.getDependencies()) {
+      try {
+        String version = dependency.getVersion();
+        Artifact artifact = resolveLatestVersionRange(dependency, dependency.getVersion());
+
+        if (!artifact.getVersion().equals(version)) {
+          updateDependency(pom, artifact, artifact.getVersion());
+          changed |= true;
+        }
+      } catch (MojoExecutionException e) {
+        if (!failImmediately) {
+          getLog().warn(e.getMessage());
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    if (project.getDependencyManagement() != null) {
+      for (Dependency dependency : project.getDependencyManagement().getDependencies()) {
+        try {
+          String version = dependency.getVersion();
+          Artifact artifact = resolveLatestVersionRange(dependency, dependency.getVersion());
+
+          if (!artifact.getVersion().equals(version)) {
+            updateDependencyManagement(pom, artifact, artifact.getVersion());
             changed |= true;
           }
         } catch (MojoExecutionException e) {
@@ -122,8 +162,45 @@ public class StickyBoundsMojo
       }
     }
 
-    if (changed)
+    if (changed) {
       writeChanges(pom);
+    }
+  }
+
+  private Artifact resolveLatestVersionRange(Dependency dependency, String version) throws MojoExecutionException {
+    Matcher versionMatch = matchVersion(version);
+    Artifact artifact = new DefaultArtifact(dependency.getGroupId(), dependency.getArtifactId(),
+                                            dependency.getType(), dependency.getClassifier(), version);
+
+    if (versionMatch.matches()) {
+
+        Version highestVersion = highestVersion(artifact);
+        String upperVersion = versionMatch.group(1) != null
+                              ? versionMatch.group(1)
+                              : "";
+        String newVersion = "[" + highestVersion.toString() + "," + upperVersion + ")";
+
+        artifact = artifact.setVersion(newVersion);
+        return artifact;
+    } else {
+      return artifact;
+    }
+  }
+
+  private Dependency findDependencyUsingVersionProperty(String propertyName) {
+    for (Dependency dependency : project.getDependencies()) {
+      if (propertyName.equals(dependency.getArtifactId() + ".version")) {
+        return dependency;
+      }
+    }
+    if (project.getDependencyManagement() != null) {
+      for (Dependency dependency : project.getDependencyManagement().getDependencies()) {
+        if (propertyName.equals(dependency.getArtifactId() + ".version")) {
+          return dependency;
+        }
+      }
+    }
+    return null;
   }
 
   private void writeChanges(Document pom) {
@@ -172,9 +249,35 @@ public class StickyBoundsMojo
     return v.getHighestVersion();
   }
 
-  void update(Document pom, Artifact artifact, String newVersion) throws MojoExecutionException {
+  void updateProperty(Document pom, String propertyName, String newVersion) throws MojoExecutionException {
     XPathContext context = new XPathContext("mvn", "http://maven.apache.org/POM/4.0.0");
-    Nodes nodes = pom.query(dependencyPath(artifact.getArtifactId()), context);
+    Nodes nodes = pom.query("//mvn:properties", context);
+
+    if (nodes.size() > 0) {
+      final Element propertiesElement = (Element) nodes.get(0);
+      Elements properties = propertiesElement.getChildElements();
+      for (int i = 0; i < properties.size(); i++) {
+        Element property = properties.get(i);
+        if (property.getLocalName().equals(propertyName)) {
+          Element newRange = new Element(propertyName, "http://maven.apache.org/POM/4.0.0");
+          newRange.appendChild(newVersion);
+          propertiesElement.replaceChild(property, newRange);
+        }
+      }
+    }
+  }
+
+  void updateDependency(Document pom, Artifact artifact, String newVersion) throws MojoExecutionException {
+    updateDependency(pom, dependencyPath(artifact.getArtifactId()), newVersion, artifact);
+  }
+
+  void updateDependencyManagement(Document pom, Artifact artifact, String newVersion) throws MojoExecutionException {
+    updateDependency(pom, dependencyManagementPath(artifact.getArtifactId()), newVersion, artifact);
+  }
+
+  private void updateDependency(Document pom, String dependencyPath, String newVersion, Artifact artifact) throws MojoExecutionException {
+    XPathContext context = new XPathContext("mvn", "http://maven.apache.org/POM/4.0.0");
+    Nodes nodes = pom.query(dependencyPath, context);
 
     if (nodes.size() == 0) {
       throw new MojoExecutionException(String.format("Missing <dependency> element for dependency %s, skipping.", artifact.getArtifactId()));
@@ -191,10 +294,12 @@ public class StickyBoundsMojo
       final Nodes versionNodes = dependency.query("mvn:version", context);
       if (versionNodes.size() > 0) {
         getLog().info("Updating " + artifact.toString() + " to " + newVersion);
-        Node version = versionNodes.get(0);
-        Element newRange = new Element("version", "http://maven.apache.org/POM/4.0.0");
-        newRange.appendChild(newVersion);
-        dependency.replaceChild(version, newRange);
+        Element version = (Element) versionNodes.get(0);
+        if (!version.getValue().startsWith("${") || updateProperties ) {
+          Element newRange = new Element("version", "http://maven.apache.org/POM/4.0.0");
+          newRange.appendChild(newVersion);
+          dependency.replaceChild(version, newRange);
+        }
       } else {
         throw new MojoExecutionException(String.format("Missing <version> element for dependency %s, skipping.", artifact.getArtifactId()));
       }
@@ -203,6 +308,10 @@ public class StickyBoundsMojo
 
   private String dependencyPath(String artifactId) {
     return "//mvn:dependencies/mvn:dependency/mvn:artifactId[text()='" + artifactId + "']";
+  }
+
+  private String dependencyManagementPath(String artifactId) {
+    return "//mvn:dependencyManagement/mvn:dependencies/mvn:dependency/mvn:artifactId[text()='" + artifactId + "']";
   }
 
   private Document load() {
